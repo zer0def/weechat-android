@@ -84,7 +84,7 @@ public class RelayConnection {
     // start connecting in another thread. the first posted event will run to completion, but the
     // second part may be canceled by disconnect(). note that android won't print some exceptions
     // https://stackoverflow.com/questions/28897239/log-e-does-not-print-the-stack-trace-of-unknownhostexception
-    public synchronized void connect() {
+    public synchronized void connect(String totp) {
         logger.trace("connect()");
         setState(STATE.CONNECTING);
 
@@ -96,7 +96,7 @@ public class RelayConnection {
                 if (state == STATE.DISCONNECTED) return;    // can happen very rarely
                 logger.trace("controlStream → connected; starting threads");
                 setState(STATE.CONNECTED);
-                startThreadsAndAuthenticate();
+                startThreadsAndAuthenticate(totp);
             }
         });
         eventStream.start();
@@ -122,14 +122,14 @@ public class RelayConnection {
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
-    private void startThreadsAndAuthenticate() {
+    private void startThreadsAndAuthenticate(String totp) {
         new Utils.FriendlyThread("ReadStream", iteration, new Protected("readStream", () -> {
             while (!Thread.interrupted()) onMessage(Utils.getRelayMessage(streams.inputStream));
         })).start();
 
         if (streams.outputStream != null) writerStream.start();
 
-        handshake.start();
+        handshake.start(totp);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -150,9 +150,11 @@ public class RelayConnection {
         // logger.trace("onMessage(id={})", message.getID());
         if (state == STATE.DISCONNECTED) return;
 
-        if (handshake != null && handshake.onMessage(message) == Authenticated.Yes) {
-            setState(STATE.AUTHENTICATED);
-            handshake = null;
+        if (handshake != null) {
+            if (handshake.onMessage(message) == Authenticated.Yes) {
+                setState(STATE.AUTHENTICATED);
+                handshake = null;
+            }
         }
 
         eventStream.post(() -> observer.onMessage(message));

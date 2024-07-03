@@ -257,7 +257,7 @@ public class RelayService extends Service implements IObserver {
         }
 
         connection = new RelayConnection(conn, P.handshakeMethod, P.pass, this);
-        connection.connect();
+        connection.connect("");
         return TRY.POSSIBLE;
     }
 

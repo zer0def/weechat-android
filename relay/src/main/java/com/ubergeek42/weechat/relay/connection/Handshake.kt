@@ -34,11 +34,17 @@ enum class HandshakeMethod(val string: String) {
 
 enum class Authenticated { Yes, NotYet }
 
+class TotpExpectedException : IllegalArgumentException {
+    constructor() : super()
+    constructor(message: String) : super(message)
+    constructor(message: String, cause: Throwable) : super(message, cause)
+    constructor(cause: Throwable) : super(cause)
+}
 
 interface Handshake {
     val connection: RelayConnection
 
-    fun start()
+    fun start(totp: String?)
     fun onMessage(message: RelayMessage): Authenticated
 
     fun checkForVersionResponse(message: RelayMessage): Authenticated {
@@ -64,7 +70,7 @@ class CompatibilityHandshake(
     override val connection: RelayConnection,
     private val password: String
 ): Handshake {
-    override fun start() {
+    override fun start(totp: String?) {
         connection.sendMessage("init password=${password.withCommasEscaped},compression=zlib\n" +
                                "($VERSION_MESSAGE_ID) info version_number\n")
     }
@@ -78,20 +84,24 @@ class ModernHandshake(
     private val password: String,
     private val onlyFastHashingAlgorithms: Boolean
 ): Handshake {
-    override fun start() {
+    var _totp: String = "";
+    override fun start(totp: String?) {
         val algorithms = Algorithm.values()
                 .filter { if (onlyFastHashingAlgorithms) it.fast else true }
                 .filter { if (password.isEmpty()) it.canHandleEmptyPassword else true }
                 .joinToString(":") { it.string }
         connection.sendMessage("($HANDSHAKE_MESSAGE_ID) handshake " +
                 "password_hash_algo=$algorithms,compression=zlib")
+
     }
 
     override fun onMessage(message: RelayMessage): Authenticated {
         if (HANDSHAKE_MESSAGE_ID == message.id) {
             val (algorithm, iterations, totp, serverNonce) = message.asHandshakeResponse()
 
-            if (totp == Totp.On) throw IllegalArgumentException("TOTP not supported")
+            if (totp == Totp.On) {
+                if (_totp.isEmpty()) throw TotpExpectedException()
+            }
 
             val passwordOptionPair = when (algorithm) {
                 Algorithm.Plain -> {
